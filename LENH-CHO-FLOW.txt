@@ -1,0 +1,69 @@
+Thêm cơ chế PLUGIN cho công cụ này. Làm ĐÚNG 4 việc dưới đây, KHÔNG sửa hay định dạng lại bất kỳ file nào khác.
+
+1) Tạo file mới `services/pluginHost.ts` với ĐÚNG NGUYÊN VĂN nội dung dưới đây — không thêm, không bớt, không đổi một ký tự nào (kể cả chú thích và địa chỉ URL):
+
+```ts
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import { Flow } from 'flow-sdk';
+import * as constants from '../constants';
+import * as audioSynthesizer from './audioSynthesizer';
+import * as entityResolutionService from './entityResolutionService';
+import * as ffmpegService from './ffmpegService';
+import * as geminiService from './geminiService';
+import * as pipelineRunnerService from './pipelineRunnerService';
+import * as projectStorageService from './projectStorageService';
+import * as promptComposer from './promptComposer';
+import * as storyboardGraphService from './storyboardGraphService';
+import * as voiceInference from './voiceInference';
+
+// Viết cứng: ai mở tool cũng chạy code ở địa chỉ này — không cho nhập từ giao diện.
+export const PLUGIN_URL = 'https://raw.githubusercontent.com/tamtuy1990/flow-recap-plugin/main/plugin.js';
+
+export type PluginCleanup = (() => void) | void;
+
+export async function mountPlugin(container: HTMLElement, app: Record<string, unknown>): Promise<PluginCleanup> {
+  // shortcut: CDN của raw.githubusercontent giữ bản cũ tối đa ~5 phút, ?t= để lách; cần tức thì thì ghim commit.
+  const res = await fetch(`${PLUGIN_URL}?t=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Không tải được plugin (HTTP ${res.status})`);
+  // raw.githubusercontent trả text/plain nên không import() thẳng được — bọc qua Blob.
+  const blobUrl = URL.createObjectURL(new Blob([await res.text()], { type: 'text/javascript' }));
+  try {
+    const mod = await import(/* @vite-ignore */ blobUrl);
+    if (typeof mod.mount !== 'function') throw new Error('plugin.js thiếu hàm mount(container, host)');
+    return mod.mount(container, {
+      Flow,
+      React,
+      ReactDOM,
+      app,
+      services: {
+        constants,
+        audioSynthesizer,
+        entityResolutionService,
+        ffmpegService,
+        geminiService,
+        pipelineRunnerService,
+        projectStorageService,
+        promptComposer,
+        storyboardGraphService,
+        voiceInference,
+      },
+    });
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+```
+
+2) Trong `components/TopToolbar.tsx`: thêm prop tuỳ chọn `onOpenPlugin?: () => void` và một nút "🧩 Plugin" đặt ngay cạnh nút "Tải mã nguồn", cùng kiểu dáng với nút đó; bấm nút thì gọi `onOpenPlugin`.
+
+3) Trong `App.tsx`:
+   - Thêm state `isPluginOpen` (mặc định false) và truyền `onOpenPlugin={() => setIsPluginOpen(true)}` vào `<TopToolbar>`.
+   - Khi `isPluginOpen` là true, hiện một modal toàn màn hình bằng `createPortal` (giống các modal sẵn có), nền tối, có tiêu đề "Plugin", nút "Đóng", và một `<div>` chiếm phần còn lại (cuộn được) làm chỗ chứa plugin.
+   - Khi modal mở: gọi `mountPlugin(divChứa, { getNodes: () => latestNodesRef.current, setNodes, getEdges: () => latestEdgesRef.current, setEdges })` (import `mountPlugin` từ `./services/pluginHost`). Giữ lại hàm dọn dẹp mà nó trả về.
+   - Nếu `mountPlugin` báo lỗi: hiện thông điệp lỗi màu đỏ trong modal (không dùng alert).
+   - Khi bấm "Đóng": gọi hàm dọn dẹp (nếu có) rồi đóng modal.
+
+4) Cập nhật `services/sourceBundle.ts` để nút "Tải mã nguồn" xuất ra cả file mới `services/pluginHost.ts` và nội dung mới của `components/TopToolbar.tsx`, `App.tsx`.
+
+Làm xong, liệt kê đúng các file đã đổi.
